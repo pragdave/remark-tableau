@@ -1,0 +1,47 @@
+{
+  "name": "remark-tableau",
+  "version": "0.1.0",
+  "description": "A remark plugin that renders Tableau (ts-tableau) fenced code blocks as HTML tables.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run clean && tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "remark",
+    "remark-plugin",
+    "markdown",
+    "tableau"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ts-tableau": "github:pragdave/ts-tableau",
+    "unist-util-visit": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^22.0.0",
+    "rehype-raw": "^7.0.0",
+    "rehype-stringify": "^10.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.1",
+    "typescript": "^5.6.2",
+    "unified": "^11.0.5",
+    "vitest": "^2.1.4"
+  }
+}
