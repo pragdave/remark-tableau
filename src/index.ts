@@ -16,10 +16,10 @@ const remarkTableau: Plugin<[], Root> = () => {
         value = generate(table).join("\n")
       } catch (err) {
         const line = node.position?.start.line
-        throw new Error(`remark-tableau: ${err} (${file.path}:${line})`)
+        throw new Error(`remark-tableau: ${err} (${file.path ?? "<unknown>"}:${line})`)
       }
 
-      const htmlNode: Html = { type: "html", value }
+      const htmlNode: Html = { type: "html", value, position: node.position }
       parent.children[index] = htmlNode
     })
   }

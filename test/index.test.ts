@@ -33,6 +33,9 @@ describe("remark-tableau", () => {
 
   it("throws a descriptive error on a malformed tableau block", () => {
     const markdown = "```tableau\na|b\n===\n===\n```\n"
-    expect(() => run(markdown)).toThrowError(/^remark-tableau: /)
+    // The block's opening fence is on line 1, and the thrown error reports
+    // the code block's starting line (per spec), not the specific line
+    // within it where the parser detected the problem.
+    expect(() => run(markdown)).toThrowError(/^remark-tableau: .+\(.*:1\)$/)
   })
 })
