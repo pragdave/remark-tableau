@@ -27,36 +27,64 @@ not `<em>`.
   HTML string unambiguously — no HTML parsing needed, and no need to wait
   for `rehype-raw` to run on a separate downstream pass.
 - **The cell-content sub-pipeline inherits the consumer's own remark
-  plugins automatically, via unified's processor-cloning mechanism —
-  not a hardcoded plugin list.** Inside a plugin's attacher function,
-  `this` is bound to the processor being configured. Calling a processor
-  as a function (`this()`) returns a fresh, unfrozen clone that inherits
-  every plugin already `.use()`'d on it. `remarkTableau`'s attacher does
-  `this().use(remarkRehype).use(rehypeStringify)` to build the cell
-  sub-pipeline — automatically picking up whatever remark-syntax plugins
-  (GFM, math, frontmatter, footnotes, anything) the consumer already
-  attached *before* `remarkTableau` in their own `.use()` chain, with
-  zero explicit dependency on any of them. This also means `remark-parse`
-  doesn't need to be an explicit dependency of this plugin either — by
-  the time `remarkTableau`'s attacher runs, a `Parser` (`remark-parse` or
-  equivalent) is *guaranteed* to already be attached to `this`, since
-  `remarkTableau` only ever receives a valid mdast tree to visit because
-  parsing already happened.
+  plugins automatically, by replaying `this.attachers` — not a hardcoded
+  plugin list, and not `this()`-cloning.** Inside a plugin's attacher
+  function, `this` is bound to the processor being configured, and
+  `this.attachers` is the array of `[plugin, ...params]` tuples every
+  `.use()` call on that processor has queued so far (this is the same
+  field unified's own `Processor.prototype.copy()` reads to implement
+  `this()`-cloning — not a private workaround, but unified's own
+  documented mechanism, used the same way).
+  `remarkTableau`'s attacher builds a fresh `unified()` processor and
+  replays every entry in `this.attachers` onto it via `.use(attacher,
+  ...params)` — **except the entry whose plugin is `remarkTableau`
+  itself** (filtered by function-reference identity: `attacher !==
+  remarkTableau`) — then adds `remarkRehype`/`rehypeStringify` on top.
+  This automatically picks up whatever remark-syntax plugins (GFM, math,
+  frontmatter, footnotes, anything) the consumer already attached
+  *before* `remarkTableau` in their own `.use()` chain, with zero
+  explicit dependency on any of them, while positively excluding
+  `remarkTableau` itself regardless of where in the pipeline it was
+  attached. This also means `remark-parse` doesn't need to be an explicit
+  dependency of this plugin either — by the time `remarkTableau`'s
+  attacher runs, a `Parser` (`remark-parse` or equivalent) is
+  *guaranteed* to already be attached to `this`, since `remarkTableau`
+  only ever receives a valid mdast tree to visit because parsing already
+  happened.
+  - **Corrected understanding of unified's lifecycle (this invalidated an
+    earlier draft of this spec):** `.use()` only *queues* a plugin by
+    pushing onto `this.attachers`; attacher functions don't run until
+    `.freeze()` (triggered lazily by the first `.parse()`/`.run()`/
+    `.process()` call), which iterates the *already-complete*
+    `this.attachers` array in order and calls each attacher with `this`
+    bound to the *same* processor object. That means by the time
+    `remarkTableau`'s own attacher body executes at all, its own entry is
+    unavoidably already present in `this.attachers` — there is no point
+    in its lifecycle, early or late in its attacher body, where `this()`
+    (or any clone of `this.attachers` taken as-is) excludes it. The fix
+    is exclusion by filtering, not by timing.
   - **Caveat, to document**: this only captures plugins attached before
     `remarkTableau` in the chain — plugins added after it don't exist yet
-    to be cloned. In practice this is a non-issue: remark-syntax plugins
-    conventionally go early (they need to be present during parsing
-    anyway), so `remarkTableau` just needs one line in the README: attach
-    it after your syntax plugins.
+    in `this.attachers` at the point `remarkTableau`'s attacher runs (its
+    own attacher runs in `.attachers` order during `.freeze()`, so later
+    entries haven't been iterated to, and more importantly a consumer
+    typically wouldn't `.use()` anything *after* remarkTableau since it
+    replaces code nodes with final `html` nodes). In practice this is a
+    non-issue: remark-syntax plugins conventionally go early (they need
+    to be present during parsing anyway), so `remarkTableau` just needs
+    one line in the README: attach it after your syntax plugins.
   - This directly replaces the earlier "should the sub-pipeline be
     configurable via a plugin option" question — it's configurable, just
     implicitly through normal pipeline composition, no new options API
     needed.
-- **No reentrancy risk, by construction.** The cloned processor never has
-  `remarkTableau` itself attached (it's cloned at the moment
-  `remarkTableau`'s own attacher runs, before `remarkTableau` could
-  possibly re-attach itself), so a cell containing something that looks
-  like nested table markdown can't recurse back into this plugin.
+- **No reentrancy risk, by construction.** The sub-pipeline is built by
+  replaying `this.attachers` with `remarkTableau` itself explicitly
+  filtered out by identity, so it can never contain `remarkTableau`
+  regardless of when or where in the chain it was attached — a cell
+  containing something that looks like nested table markdown can't
+  recurse back into this plugin. Verified directly: a cell whose content
+  is itself a fenced `​```tableau` block renders as an inert
+  `<pre><code class="language-tableau">`, not a second nested `<table>`.
 - **A cell's markdown failing to render fails the whole document**, with
   a clear error — matching how a malformed `​```tableau` block already
   behaves (no silent per-cell fallback to raw text).
@@ -71,10 +99,11 @@ not `<em>`.
 ## Architecture
 
 `src/index.ts` changes from an arrow-function attacher to a regular
-`function` (arrow functions don't bind `this` from the call site, and the
-`this()`-cloning trick requires the real bound `this`):
+`function` (arrow functions don't bind `this` from the call site, and
+reading `this.attachers` requires the real bound `this`):
 
 ```ts
+import { unified } from "unified"
 import { visit } from "unist-util-visit"
 import { tableau, generate } from "ts-tableau"
 import remarkRehype from "remark-rehype"
@@ -93,7 +122,19 @@ function unescapeMarkdown(text: string): string {
 }
 
 const remarkTableau: Plugin<[], Root> = function (this: Processor) {
-  const cellProcessor = this().use(remarkRehype).use(rehypeStringify)
+  // Replay every plugin already queued on the outer processor onto a
+  // fresh one, except remarkTableau itself -- this.attachers is the same
+  // field unified's own Processor.prototype.copy() reads to implement
+  // this()-cloning. We can't use this() directly: by the time an
+  // attacher's own body runs (during .freeze(), which iterates the
+  // already-complete attachers array), its own entry is unavoidably
+  // already in the list, so this() would clone remarkTableau right back
+  // in. Filtering by identity is what actually excludes it.
+  const cellProcessor = unified()
+  for (const [attacher, ...params] of this.attachers) {
+    if (attacher !== remarkTableau) cellProcessor.use(attacher, ...params)
+  }
+  cellProcessor.use(remarkRehype).use(rehypeStringify)
 
   async function renderMarkers(html: string): Promise<string> {
     const matches = Array.from(html.matchAll(TABLEAU_MD_RE))
