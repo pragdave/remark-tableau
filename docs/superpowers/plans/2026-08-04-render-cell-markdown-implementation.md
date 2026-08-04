@@ -315,8 +315,8 @@ cells as block-level content, not a regression.
 Existing tests updated for the new async API (processor.run(), not
 runSync()) and the new rendered-content shape; new tests cover inline
 emphasis, multi-cell independence, the malformed-block error path
-under async, reentrancy safety (a cell containing literal
-```tableau-looking text doesn't get processed as a nested table), and
+under async, reentrancy safety (a cell containing literal fenced
+tableau-looking text doesn't get processed as a nested table), and
 a cell markdown render failure propagating as a document-level error.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
