@@ -38,3 +38,5 @@ Because rendering cell Markdown is asynchronous, use `.process()` (as in the exa
 ## Security
 
 Cell content is rendered as real Markdown, the same as the rest of your document. If you're processing untrusted Markdown, run [`rehype-sanitize`](https://github.com/rehypejs/rehype-sanitize) after this plugin in your pipeline -- the same advice that already applies to the rest of a Markdown document applies equally to table cells.
+
+Raw HTML written literally inside cell Markdown source is dropped by default: the cell sub-pipeline doesn't enable `allowDangerousHtml`, and since plugins queued after `remarkTableau` (including a consumer's own `remark-rehype, { allowDangerousHtml: true }` if attached there) aren't replayed into cell rendering, that option can't leak into cells either.

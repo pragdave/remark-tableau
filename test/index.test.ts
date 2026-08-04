@@ -92,4 +92,25 @@ describe("remark-tableau", () => {
     const markdown = "```tableau\nTRIGGER_ERROR|b\n```\n"
     await expect(processor.run(processor.parse(markdown))).rejects.toThrowError(/remark-tableau: .*boom/)
   })
+
+  it("does not replay plugins attached after remarkTableau into the cell sub-pipeline", async () => {
+    const marker: Plugin = () => (tree) => {
+      visit(tree, "text", (node: any) => {
+        node.value += "!!MARK!!"
+      })
+    }
+    const processor = unified().use(remarkParse).use(remarkTableau).use(marker)
+    const markdown = "hello\n\n```tableau\n_a_|b\n```\n"
+    const tree = await processor.run(processor.parse(markdown))
+
+    // Positive control: the marker plugin does run on the outer document,
+    // proving it would show up in cell output too if it leaked in.
+    const paragraph = tree.children[0] as any
+    expect(paragraph.children[0].value).toContain("!!MARK!!")
+
+    // But it must not have been replayed into the cell sub-pipeline: a
+    // plugin queued after remarkTableau should never touch cell rendering.
+    const tableNode = tree.children[1] as any
+    expect(tableNode.value).not.toContain("!!MARK!!")
+  })
 })

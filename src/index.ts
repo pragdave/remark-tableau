@@ -18,8 +18,21 @@ function unescapeMarkdown(text: string): string {
 
 const remarkTableau: Plugin<[], Root> = function (this: Processor) {
   const cellProcessor = unified()
+  // Replay every plugin already queued on the outer processor onto a
+  // fresh one, stopping at remarkTableau itself (and excluding
+  // everything after it too, since this.attachers already holds the
+  // complete chain by the time this attacher runs -- unified's
+  // .freeze() only starts iterating after every .use() call has
+  // completed). this.attachers is the same field unified's own
+  // Processor.prototype.copy() reads to implement this()-cloning, but
+  // this() itself doesn't work here: cloning this.attachers as-is would
+  // include remarkTableau's own entry, since there's no point in its
+  // lifecycle where that entry is absent from the array. Filtering with
+  // break is what actually excludes it (and everything queued after
+  // it).
   for (const [attacher, ...params] of this.attachers) {
-    if (attacher !== remarkTableau) cellProcessor.use(attacher, ...params)
+    if (attacher === remarkTableau) break
+    cellProcessor.use(attacher, ...params)
   }
   cellProcessor.use(remarkRehype).use(rehypeStringify)
 
