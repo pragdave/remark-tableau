@@ -4,7 +4,7 @@
 
 **Goal:** Make `remarkTableau` actually render the Markdown inside every `<tableau-md>` marker `ts-tableau` emits, using a cell-content sub-pipeline that automatically inherits the consumer's own remark-syntax plugins.
 
-**Architecture:** `src/index.ts`'s attacher becomes a regular `function` (not an arrow function) so it can use `this` — bound by unified to the processor it's attached to — to clone the processor's current plugin state (`this()`) and extend that clone with `remark-rehype`/`rehype-stringify` to build a self-contained cell-rendering sub-pipeline. The main transform becomes `async`, extracting and replacing every `<tableau-md>` marker in the generated HTML string before wrapping it in the mdast `html` node, same as today.
+**Architecture:** `src/index.ts`'s attacher becomes a regular `function` (not an arrow function) so it can use `this` — bound by unified to the processor it's attached to — to read `this.attachers` (the array of `[plugin, ...params]` tuples every `.use()` call has queued) and replay every entry onto a fresh `unified()` processor *except remarkTableau itself* (filtered by function-reference identity), then extend that with `remark-rehype`/`rehype-stringify` to build a self-contained cell-rendering sub-pipeline. (An earlier draft of this plan used `this()`-cloning instead; that doesn't work — see Global Constraints below — the explicit filter is required.) The main transform becomes `async`, extracting and replacing every `<tableau-md>` marker in the generated HTML string before wrapping it in the mdast `html` node, same as today.
 
 **Tech Stack:** TypeScript, Vitest, `unified`/`remark`/`rehype` ecosystem, `ts-tableau` (unchanged).
 
@@ -13,7 +13,7 @@
 - No new plugin, no new package export — everything lives inside the existing `remarkTableau` default export.
 - Marker extraction regex: `` /<tableau-md>([\s\S]*?)<\/tableau-md>/g `` — safe because `ts-tableau`'s `escape_markdown()` guarantees escaped cell content can never contain a literal `<`.
 - Unescaping order (reversing `escape_markdown`'s escape order): `&gt;`→`>` first, then `&lt;`→`<`, then `&amp;`→`&` last.
-- Cell sub-pipeline: `this().use(remarkRehype).use(rehypeStringify)` — inherits whatever's already attached to `this` (guaranteed to include a `Parser`, since `remarkTableau` only ever runs after parsing has already happened). No hardcoded `remark-gfm` or other syntax-plugin dependency.
+- Cell sub-pipeline: built by iterating `this.attachers` (the array unified's own `Processor.prototype.copy()` reads to implement `this()`-cloning — a documented mechanism, not a private workaround) and calling `.use(attacher, ...params)` on a fresh `unified()` processor for every entry **except** the one whose plugin is `remarkTableau` itself (`attacher !== remarkTableau`), then `.use(remarkRehype).use(rehypeStringify)` on top. **Do not use `this()` for this** — it does not exclude remarkTableau. unified's `.use()` only queues plugins by pushing onto `this.attachers`; attacher functions run later, during `.freeze()`, which iterates the already-complete `this.attachers` array. By the time remarkTableau's own attacher body executes, its own entry is unavoidably already in `this.attachers`, so `this()` clones it right back in — verified live: without the filter, a cell containing nested `​```tableau`-looking content gets recursively re-rendered as a real table instead of inert code, and that recursively-produced HTML then gets silently dropped by remark-rehype's default (non-`allowDangerousHtml`) sanitization, leaving the cell empty. The filtered-replay approach inherits whatever's already attached to `this` (guaranteed to include a `Parser`, since `remarkTableau` only ever runs after parsing has already happened) while positively excluding remarkTableau regardless of attach order. No hardcoded `remark-gfm` or other syntax-plugin dependency.
 - A cell's markdown failing to render fails the whole document (propagates as the existing `remark-tableau: ...` prefixed error), not a silent per-cell fallback.
 - The main transform is `async`; `unist-util-visit`'s visitor stays synchronous (it doesn't support async callbacks) — collect matching `code` nodes first, process them afterward in a `for...of` loop with `await`.
 - **This changes existing test expectations beyond just async-ifying them**: rendering cell content as Markdown means even simple text gets wrapped in a block element (e.g. cell content `a` renders as `<p>a</p>`, not bare `a`) — this matches the reference implementation's own behavior (Pandoc's `md2ast` also produces block-level content per cell), not a regression to work around.
@@ -148,6 +148,7 @@ Expected: FAIL. The current implementation is synchronous and doesn't touch `<ta
 Replace the full content with:
 
 ```ts
+import { unified } from "unified"
 import { visit } from "unist-util-visit"
 import { tableau, generate } from "ts-tableau"
 import remarkRehype from "remark-rehype"
@@ -166,7 +167,19 @@ function unescapeMarkdown(text: string): string {
 }
 
 const remarkTableau: Plugin<[], Root> = function (this: Processor) {
-  const cellProcessor = this().use(remarkRehype).use(rehypeStringify)
+  // Replay every plugin already queued on the outer processor onto a
+  // fresh one, except remarkTableau itself. this.attachers is the same
+  // field unified's own Processor.prototype.copy() reads to implement
+  // this()-cloning -- but this() itself doesn't work here: by the time
+  // an attacher's own body runs (during .freeze(), which iterates the
+  // already-complete attachers array), its own entry is unavoidably
+  // already in the list, so this() would clone remarkTableau right back
+  // in. Filtering by identity is what actually excludes it.
+  const cellProcessor = unified()
+  for (const [attacher, ...params] of this.attachers) {
+    if (attacher !== remarkTableau) cellProcessor.use(attacher, ...params)
+  }
+  cellProcessor.use(remarkRehype).use(rehypeStringify)
 
   async function renderMarkers(html: string): Promise<string> {
     const matches = Array.from(html.matchAll(TABLEAU_MD_RE))
@@ -278,12 +291,14 @@ Render Markdown inside <tableau-md> cell content
 
 remarkTableau's attacher is now a regular function (not an arrow
 function) so it can use `this` -- bound by unified to the processor
-it's attached to -- to build a cell-content sub-pipeline via
-this().use(remarkRehype).use(rehypeStringify). The clone inherits
+it's attached to -- to build a cell-content sub-pipeline by replaying
+this.attachers onto a fresh unified() processor, explicitly excluding
+remarkTableau itself by function-reference identity. This inherits
 whatever remark-syntax plugins (GFM, math, anything) the consumer
 already attached before remarkTableau in their own pipeline, with no
-hardcoded dependency on any of them, and no reentrancy risk since the
-clone is taken before remarkTableau could attach itself to it.
+hardcoded dependency on any of them, while positively excluding
+remarkTableau so a cell containing nested tableau-looking content
+can't recurse back into this plugin.
 
 The main transform is now async: it extracts every <tableau-md>
 marker from the generated HTML via regex (safe because

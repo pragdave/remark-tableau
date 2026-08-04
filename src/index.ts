@@ -1,5 +1,6 @@
 import { visit } from "unist-util-visit"
 import { tableau, generate } from "ts-tableau"
+import { unified } from "unified"
 import remarkRehype from "remark-rehype"
 import rehypeStringify from "rehype-stringify"
 import type { Plugin, Processor } from "unified"
@@ -16,7 +17,11 @@ function unescapeMarkdown(text: string): string {
 }
 
 const remarkTableau: Plugin<[], Root> = function (this: Processor) {
-  const cellProcessor = this().use(remarkRehype).use(rehypeStringify)
+  const cellProcessor = unified()
+  for (const [attacher, ...params] of this.attachers) {
+    if (attacher !== remarkTableau) cellProcessor.use(attacher, ...params)
+  }
+  cellProcessor.use(remarkRehype).use(rehypeStringify)
 
   async function renderMarkers(html: string): Promise<string> {
     const matches = Array.from(html.matchAll(TABLEAU_MD_RE))
