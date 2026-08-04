@@ -63,16 +63,26 @@ not `<em>`.
     in its lifecycle, early or late in its attacher body, where `this()`
     (or any clone of `this.attachers` taken as-is) excludes it. The fix
     is exclusion by filtering, not by timing.
-  - **Caveat, to document**: this only captures plugins attached before
-    `remarkTableau` in the chain — plugins added after it don't exist yet
-    in `this.attachers` at the point `remarkTableau`'s attacher runs (its
-    own attacher runs in `.attachers` order during `.freeze()`, so later
-    entries haven't been iterated to, and more importantly a consumer
-    typically wouldn't `.use()` anything *after* remarkTableau since it
-    replaces code nodes with final `html` nodes). In practice this is a
-    non-issue: remark-syntax plugins conventionally go early (they need
-    to be present during parsing anyway), so `remarkTableau` just needs
-    one line in the README: attach it after your syntax plugins.
+  - **Caveat, corrected during the final whole-branch review**: an
+    earlier draft of this bullet claimed plugins attached *after*
+    `remarkTableau` "don't exist yet in `this.attachers` at the point
+    `remarkTableau`'s attacher runs" — that's wrong for the same reason
+    the `this()` claim above was wrong. `.freeze()` only starts iterating
+    *after* every `.use()` call has already run, so by the time
+    `remarkTableau`'s attacher body executes, `this.attachers` already
+    holds the *entire* chain, including entries added after it. A naive
+    filter that only excludes `remarkTableau`'s own entry (`attacher !==
+    remarkTableau`) therefore *also* replays every later-attached plugin
+    into the cell sub-pipeline — verified live: a `rehype`-side plugin
+    attached after `remarkTableau` got applied twice to cell content (once
+    inside the cell sub-pipeline, once again on the outer document). The
+    fix is to stop replaying at the first entry matching `remarkTableau`
+    (`break` instead of a bare skip), which correctly excludes both
+    `remarkTableau` itself and everything queued after it, since
+    `this.attachers` preserves `.use()` call order. This makes "attach
+    remarkTableau after your syntax plugins" a real requirement, not just
+    a convention: plugins attached after it are now genuinely excluded
+    from the cell sub-pipeline, matching the README.
   - This directly replaces the earlier "should the sub-pipeline be
     configurable via a plugin option" question — it's configurable, just
     implicitly through normal pipeline composition, no new options API
