@@ -8,13 +8,6 @@ import type { Root, Code, Html } from "mdast"
 const LANGUAGE = "tableau"
 const TABLEAU_MD_RE = /<tableau-md>([\s\S]*?)<\/tableau-md>/g
 
-function escapeMarkdown(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-}
-
 function unescapeMarkdown(text: string): string {
   return text
     .replace(/&gt;/g, ">")
@@ -22,15 +15,10 @@ function unescapeMarkdown(text: string): string {
     .replace(/&amp;/g, "&")
 }
 
-function wrapCellsWithMarkers(html: string): string {
-  // Replace <td>content</td> with <td><tableau-md>escaped_content</tableau-md></td>
-  return html.replace(/<td([^>]*)>([^<]*)<\/td>/g, (match, attrs, content) => {
-    return `<td${attrs}><tableau-md>${escapeMarkdown(content)}</tableau-md></td>`
-  })
-}
-
 const remarkTableau: Plugin<[], Root> = function (this: Processor) {
-  async function renderMarkers(html: string, cellProcessor: any): Promise<string> {
+  const cellProcessor = this().use(remarkRehype).use(rehypeStringify)
+
+  async function renderMarkers(html: string): Promise<string> {
     const matches = Array.from(html.matchAll(TABLEAU_MD_RE))
     if (matches.length === 0) return html
 
@@ -62,10 +50,8 @@ const remarkTableau: Plugin<[], Root> = function (this: Processor) {
       let value: string
       try {
         const table = tableau(node.value.split("\n"))
-        let html = generate(table).join("\n")
-        html = wrapCellsWithMarkers(html)
-        const cellProcessor = this().use(remarkRehype).use(rehypeStringify)
-        value = await renderMarkers(html, cellProcessor)
+        const html = generate(table).join("\n")
+        value = await renderMarkers(html)
       } catch (err) {
         const line = node.position?.start.line
         throw new Error(`remark-tableau: ${err} (${file.path ?? "<unknown>"}:${line})`)

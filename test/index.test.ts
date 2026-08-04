@@ -60,14 +60,14 @@ describe("remark-tableau", () => {
 
   it("does not recursively process a nested tableau-looking block inside cell content", async () => {
     const markdown = [
-      "```tableau",
+      "~~~tableau",
       "a|b",
       "col2 {{",
       "```tableau",
       "x|y",
       "```",
       "}}",
-      "```",
+      "~~~",
       "",
     ].join("\n")
     const tree = await run(markdown)
