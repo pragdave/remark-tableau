@@ -50,12 +50,41 @@ describe("remark-tableau", () => {
     expect(node.value).toContain("<td><p><code>d</code></p></td>")
   })
 
-  it("throws a descriptive error on a malformed tableau block", async () => {
+  it("renders an inline error for a malformed tableau block instead of failing the document", async () => {
     const markdown = "```tableau\na|b\n===\n===\n```\n"
-    // The block's opening fence is on line 1, and the thrown error reports
+    const tree = await run(markdown)
+    const node = tree.children[0] as any
+    expect(node.type).toBe("html")
+    expect(node.value).toContain("remark-tableau:")
+    // The block's opening fence is on line 1, and the reported error names
     // the code block's starting line (per spec), not the specific line
     // within it where the parser detected the problem.
-    await expect(run(markdown)).rejects.toThrowError(/^remark-tableau: .+\(.*:1\)$/)
+    expect(node.value).toMatch(/\(.*:1\)/)
+  })
+
+  it("does not let one table's error block other tables in the same document", async () => {
+    const markdown = [
+      "```tableau",
+      "a|b",
+      "```",
+      "",
+      "```tableau",
+      "a|b",
+      "===",
+      "===",
+      "```",
+      "",
+      "```tableau",
+      "c|d",
+      "```",
+      "",
+    ].join("\n")
+    const tree = await run(markdown)
+    const [first, second, third] = tree.children as any[]
+
+    expect(first.value).toContain("<td><p>a</p></td>")
+    expect(second.value).toContain("remark-tableau:")
+    expect(third.value).toContain("<td><p>c</p></td>")
   })
 
   it("does not recursively process a nested tableau-looking block inside cell content", async () => {
@@ -80,7 +109,7 @@ describe("remark-tableau", () => {
     expect(tableCount).toBe(1)
   })
 
-  it("fails the whole document if rendering a cell's markdown throws", async () => {
+  it("renders an inline error, scoped to that table, if rendering a cell's markdown throws", async () => {
     const throwing: Plugin = () => (tree) => {
       visit(tree, "text", (node: any) => {
         if (node.value.includes("TRIGGER_ERROR")) {
@@ -89,8 +118,12 @@ describe("remark-tableau", () => {
       })
     }
     const processor = unified().use(remarkParse).use(throwing).use(remarkTableau)
-    const markdown = "```tableau\nTRIGGER_ERROR|b\n```\n"
-    await expect(processor.run(processor.parse(markdown))).rejects.toThrowError(/remark-tableau: .*boom/)
+    const markdown = "```tableau\nTRIGGER_ERROR|b\n```\n\n```tableau\nc|d\n```\n"
+    const tree = await processor.run(processor.parse(markdown))
+    const [first, second] = tree.children as any[]
+
+    expect(first.value).toMatch(/remark-tableau: .*boom/)
+    expect(second.value).toContain("<td><p>c</p></td>")
   })
 
   it("does not replay plugins attached after remarkTableau into the cell sub-pipeline", async () => {

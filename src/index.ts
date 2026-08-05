@@ -16,6 +16,17 @@ function unescapeMarkdown(text: string): string {
     .replace(/&amp;/g, "&")
 }
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+}
+
+function errorHtml(message: string): string {
+  return `<pre style="border:2px solid #c00;background:#fee;color:#900;padding:0.5rem 0.75rem;white-space:pre-wrap;">${escapeHtml(message)}</pre>`
+}
+
 const remarkTableau: Plugin<[], Root> = function (this: Processor) {
   const cellProcessor = unified()
   // Replay every plugin already queued on the outer processor onto a
@@ -71,8 +82,15 @@ const remarkTableau: Plugin<[], Root> = function (this: Processor) {
         const html = generate(table).join("\n")
         value = await renderMarkers(html)
       } catch (err) {
+        // A table that fails to parse or render must not take the rest
+        // of the document down with it: replace just this table with a
+        // visible inline error and keep processing the others. The
+        // failure is still surfaced -- both inline and as a non-fatal
+        // VFile message -- just scoped to the one table that caused it.
         const line = node.position?.start.line
-        throw new Error(`remark-tableau: ${err} (${file.path ?? "<unknown>"}:${line})`)
+        const message = `remark-tableau: ${err} (${file.path ?? "<unknown>"}:${line})`
+        file.message(message, node.position, "remark-tableau")
+        value = errorHtml(message)
       }
       const htmlNode: Html = { type: "html", value, position: node.position }
       parent.children[index] = htmlNode
