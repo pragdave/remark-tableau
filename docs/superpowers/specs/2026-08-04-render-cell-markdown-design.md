@@ -95,9 +95,19 @@ not `<em>`.
   recurse back into this plugin. Verified directly: a cell whose content
   is itself a fenced `​```tableau` block renders as an inert
   `<pre><code class="language-tableau">`, not a second nested `<table>`.
-- **A cell's markdown failing to render fails the whole document**, with
-  a clear error — matching how a malformed `​```tableau` block already
-  behaves (no silent per-cell fallback to raw text).
+- **A cell's markdown failing to render is not silently swallowed** —
+  the error is surfaced with a clear message, matching how a malformed
+  `​```tableau` block already behaves. **Superseded after this spec
+  shipped**: the original decision here was "fails the *whole
+  document*", reusing whatever a malformed table already did. In
+  practice that meant one bad table anywhere in a multi-table document
+  (a guide with dozens of examples, say) blocked every other table from
+  rendering too. This was changed to isolate the failure per table
+  instead: a failing table's own output becomes a visible inline error
+  (and a non-fatal `file.message()`), while every other table in the
+  document still renders normally and the document as a whole succeeds.
+  Still loud, still visible — just scoped to the table that actually
+  failed rather than the whole document.
 - **`remarkTableau`'s transform becomes `async`.** `unist-util-visit`
   doesn't support async visitors, so the transform collects every
   matching `code` node first via a normal synchronous `visit`, then
@@ -238,9 +248,10 @@ back `&lt;`, correct.
   mechanism actually works end-to-end, not just in isolation.
 - Error handling: a cell containing Markdown that causes the sub-pipeline
   to throw (hard to construct with only well-behaved plugins attached —
-  may need a minimal throwing test double/plugin) fails the whole
-  `process()` call with a clear error, matching a malformed `​```tableau`
-  block's existing behavior.
+  may need a minimal throwing test double/plugin) surfaces a clear error
+  as that table's own inline output (superseded: no longer fails the
+  whole `process()` call — see the Decisions section), while other
+  tables in the same document are unaffected.
 
 ## Out of scope
 
