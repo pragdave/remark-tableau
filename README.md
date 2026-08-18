@@ -5,7 +5,7 @@ A [remark](https://github.com/remarkjs/remark) plugin that renders ` ```tableau 
 ## Install
 
 ```sh
-npm install github:pragdave/remark-tableau
+npm install remark-tableau
 ```
 
 ## Usage
