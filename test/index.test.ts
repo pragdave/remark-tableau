@@ -1,12 +1,14 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { unified } from "unified"
 import remarkParse from "remark-parse"
 import { visit } from "unist-util-visit"
 import type { Plugin } from "unified"
+import { tableau, generate } from "ts-tableau"
 import remarkTableau from "../src/index.js"
+import type { RemarkTableauOptions } from "../src/index.js"
 
-async function run(markdown: string) {
-  const processor = unified().use(remarkParse).use(remarkTableau)
+async function run(markdown: string, options?: RemarkTableauOptions) {
+  const processor = unified().use(remarkParse).use(remarkTableau, options)
   return processor.run(processor.parse(markdown))
 }
 
@@ -145,5 +147,62 @@ describe("remark-tableau", () => {
     // plugin queued after remarkTableau should never touch cell rendering.
     const tableNode = tree.children[1] as any
     expect(tableNode.value).not.toContain("!!MARK!!")
+  })
+
+  describe("engine options", () => {
+    it("uses the tableau and generate functions passed in", async () => {
+      const table = tableau(["x|y"])
+      const fakeTableau = vi.fn(() => table)
+      const fakeGenerate = vi.fn(() => ["<div>FAKE ENGINE</div>"])
+
+      const tree = await run("```tableau\na|b\n```\n", {
+        tableau: fakeTableau,
+        generate: fakeGenerate,
+      })
+
+      expect(fakeTableau).toHaveBeenCalledWith(["a|b"])
+      expect(fakeGenerate).toHaveBeenCalledWith(table)
+      expect((tree.children[0] as any).value).toBe("<div>FAKE ENGINE</div>")
+    })
+
+    it("uses the passed-in tableau with the default generate", async () => {
+      const fakeTableau = vi.fn(() => tableau(["x|y"]))
+
+      const tree = await run("```tableau\na|b\n```\n", { tableau: fakeTableau })
+
+      expect(fakeTableau).toHaveBeenCalledWith(["a|b"])
+      const value = (tree.children[0] as any).value
+      expect(value).toContain("<td><p>x</p></td>")
+      expect(value).not.toContain("<td><p>a</p></td>")
+    })
+
+    it("uses the passed-in generate with the default tableau", async () => {
+      const fakeGenerate = vi.fn((table: ReturnType<typeof tableau>) => [
+        "<div>FAKE GENERATE</div>",
+        ...generate(table),
+      ])
+
+      const tree = await run("```tableau\na|b\n```\n", { generate: fakeGenerate })
+
+      expect(fakeGenerate).toHaveBeenCalledTimes(1)
+      const value = (tree.children[0] as any).value
+      expect(value).toContain("<div>FAKE GENERATE</div>")
+      expect(value).toContain("<td><p>a</p></td>")
+    })
+
+    it("still isolates errors thrown by a passed-in engine to the one table", async () => {
+      const fakeTableau = vi.fn((lines: string[]) => {
+        if (lines[0] === "bad") throw new Error("custom engine failed")
+        return tableau(lines)
+      })
+
+      const tree = await run("```tableau\nbad\n```\n\n```tableau\nc|d\n```\n", {
+        tableau: fakeTableau,
+      })
+      const [first, second] = tree.children as any[]
+
+      expect(first.value).toMatch(/remark-tableau: .*custom engine failed/)
+      expect(second.value).toContain("<td><p>c</p></td>")
+    })
   })
 })

@@ -35,6 +35,17 @@ Without `{ allowDangerousHtml: true }` on `remark-rehype` and `rehype-raw` in th
 
 Because rendering cell Markdown is asynchronous, use `.process()` (as in the example above) or `.run()` -- not `.processSync()` / `.runSync()`.
 
+## Choosing the ts-tableau engine
+
+By default the plugin renders with the `ts-tableau` package it depends on. To render with a different or local build of `ts-tableau` instead, pass its `tableau` and `generate` functions (either one alone is fine; the other falls back to the default):
+
+```js
+import { tableau, generate } from "../ts-tableau/dist/index.js"
+
+.use(remarkTableau)                        // uses the ts-tableau npm package
+.use(remarkTableau, { tableau, generate }) // uses the functions passed in
+```
+
 ## Security
 
 Cell content is rendered as real Markdown, the same as the rest of your document. If you're processing untrusted Markdown, run [`rehype-sanitize`](https://github.com/rehypejs/rehype-sanitize) after this plugin in your pipeline -- the same advice that already applies to the rest of a Markdown document applies equally to table cells.

@@ -27,7 +27,17 @@ function errorHtml(message: string): string {
   return `<pre style="border:2px solid #c00;background:#fee;color:#900;padding:0.5rem 0.75rem;white-space:pre-wrap;">${escapeHtml(message)}</pre>`
 }
 
-const remarkTableau: Plugin<[], Root> = function (this: Processor) {
+export type RemarkTableauOptions = {
+  tableau?: typeof tableau
+  generate?: typeof generate
+}
+
+const remarkTableau: Plugin<[RemarkTableauOptions?], Root> = function (
+  this: Processor,
+  options: RemarkTableauOptions = {}
+) {
+  const parse = options.tableau ?? tableau
+  const render = options.generate ?? generate
   const cellProcessor = unified()
   // Replay every plugin already queued on the outer processor onto a
   // fresh one, stopping at remarkTableau itself (and excluding
@@ -78,8 +88,8 @@ const remarkTableau: Plugin<[], Root> = function (this: Processor) {
     for (const { node, index, parent } of targets) {
       let value: string
       try {
-        const table = tableau(node.value.split("\n"))
-        const html = generate(table).join("\n")
+        const table = parse(node.value.split("\n"))
+        const html = render(table).join("\n")
         value = await renderMarkers(html)
       } catch (err) {
         // A table that fails to parse or render must not take the rest
